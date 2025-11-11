@@ -1,0 +1,13 @@
+# Requirements for MVC Note App
+# Ứng dụng Ghi Chú - Kiến trúc MVC
+
+# UI Framework - CustomTkinter
+customtkinter>=5.2.0
+
+# Image Processing - Pillow
+Pillow>=10.0.0
+
+# Date Picker Widget
+tkcalendar>=1.6.0
+
+mysql-connector-python==8.0.33
