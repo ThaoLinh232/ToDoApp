@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from models import Note, NoteRepository
 from controllers import NoteController
 from views import MainView
+from constants import FilterType, Messages, FileConstraints, Priority
 
 
 class NoteApp:
@@ -28,8 +29,7 @@ class NoteApp:
         # Create main window
         self.root = ctk.CTk()
         
-        # Initialize Model - Kết nối MySQL
-        # Thay đổi thông tin kết nối tại đây nếu cần
+        # Kết nối MySQL
         self.repository = NoteRepository(
             host="localhost",
             user="root",
@@ -68,6 +68,11 @@ class NoteApp:
         # Attachments
         self.view.on_add_attachment = self._handle_add_attachment
         self.view.on_remove_attachment = self._handle_remove_attachment
+        
+        # Categories
+        self.view.on_add_category = self._handle_add_category
+        self.view.on_edit_category = self._handle_edit_category
+        self.view.on_delete_category = self._handle_delete_category
     
     def _load_initial_data(self):
         """Tải dữ liệu ban đầu"""
@@ -83,30 +88,27 @@ class NoteApp:
     
     def _handle_add_note(self, title: str, current_filter: str):
         """Xử lý thêm ghi chú mới"""
-        # Determine category from current filter
-        category = "Tất cả"
-        is_important = False
+        category = FilterType.ALL
+        priority = Priority.LOW
         
-        if current_filter == "Quan trọng":
-            is_important = True
-        elif current_filter not in ["Tất cả", "Hoàn thành", "Quan trọng"]:
+        if current_filter == FilterType.IMPORTANT:
+            priority = Priority.HIGH
+        elif current_filter not in [FilterType.ALL, FilterType.COMPLETED, FilterType.IMPORTANT]:
             category = current_filter
         
         # Create note
         note = self.controller.create_note(
             title=title,
             category=category,
-            is_important=is_important
+            priority=priority
         )
         
         if note:
-            # Refresh display
             self._refresh_current_view()
-            # Update categories
             categories = self.controller.get_categories()
             self.view.update_categories(categories)
         else:
-            messagebox.showerror("Lỗi", "Không thể tạo ghi chú!")
+            messagebox.showerror("Lỗi", Messages.ERROR_CREATE_NOTE)
     
     def _handle_update_note(self, note_id: str, **kwargs):
         """Xử lý cập nhật ghi chú"""
@@ -127,9 +129,9 @@ class NoteApp:
         success = self.controller.delete_note(note_id)
         if success:
             self._refresh_current_view()
-            messagebox.showinfo("Thành công", "Đã xóa ghi chú!")
+            messagebox.showinfo("Thành công", Messages.NOTE_DELETED)
         else:
-            messagebox.showerror("Lỗi", "Không thể xóa ghi chú!")
+            messagebox.showerror("Lỗi", Messages.ERROR_DELETE_NOTE)
     
     # ==================== Toggle Handlers ====================
     
@@ -182,31 +184,94 @@ class NoteApp:
         # Check file size (max 5MB)
         if os.path.exists(file_path):
             file_size = os.path.getsize(file_path)
-            if file_size > 5 * 1024 * 1024:
-                messagebox.showerror("Lỗi", "File quá lớn! Kích thước tối đa là 5MB.")
+            if file_size > FileConstraints.MAX_FILE_SIZE:
+                messagebox.showerror("Lỗi", Messages.ERROR_FILE_TOO_LARGE)
                 return
         
-        result = self.controller.add_attachment(note_id, file_path, "attachments")
+        result = self.controller.add_attachment(note_id, file_path, FileConstraints.ATTACHMENTS_DIR)
         if result:
-            messagebox.showinfo("Thành công", "Đã thêm file đính kèm!")
+            messagebox.showinfo("Thành công", Messages.ATTACHMENT_ADDED)
             # Refresh detail panel
             note = self.controller.get_note(note_id)
             if note:
                 self.view.show_detail_panel(note)
         else:
-            messagebox.showerror("Lỗi", "Không thể thêm file đính kèm!")
+            messagebox.showerror("Lỗi", Messages.ERROR_ADD_ATTACHMENT)
     
     def _handle_remove_attachment(self, note_id: str, file_path: str):
         """Xử lý xóa đính kèm"""
         success = self.controller.remove_attachment(note_id, file_path)
         if success:
-            messagebox.showinfo("Thành công", "Đã xóa file đính kèm!")
+            messagebox.showinfo("Thành công", Messages.ATTACHMENT_REMOVED)
             # Refresh detail panel
             note = self.controller.get_note(note_id)
             if note:
                 self.view.show_detail_panel(note)
         else:
-            messagebox.showerror("Lỗi", "Không thể xóa file đính kèm!")
+            messagebox.showerror("Lỗi", Messages.ERROR_REMOVE_ATTACHMENT)
+    
+    def _handle_add_category(self, category_name: str) -> bool:
+        """Xử lý thêm danh mục mới"""
+        import random
+        # Generate random color
+        colors = ["#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#8B5CF6", "#EC4899", "#14B8A6", "#F97316"]
+        color = random.choice(colors)
+        
+        success = self.controller.add_category(category_name, color)
+        if success:
+            messagebox.showinfo("Thành công", f"Đã thêm danh mục '{category_name}'")
+            categories = self.controller.get_categories()
+            self.view.update_categories(categories)
+            return True
+        else:
+            messagebox.showerror("Lỗi", f"Không thể thêm danh mục '{category_name}'. Có thể đã tồn tại.")
+            return False
+    
+    def _handle_edit_category(self, old_name: str, new_name: str) -> bool:
+        """Xử lý sửa tên danh mục"""
+        success = self.controller.update_category(old_name, new_name)
+        if success:
+            messagebox.showinfo("Thành công", f"Đã đổi tên danh mục '{old_name}' thành '{new_name}'")
+            
+            # Reload all
+            self.controller.repository.load_notes()
+            
+            # Refresh categories
+            categories = self.controller.get_categories()
+            self.view.update_categories(categories)
+            
+            # Tự động click vào danh mục mới để reload giao diện
+            self.view.select_category(new_name)
+            
+            return True
+        else:
+            messagebox.showerror("Lỗi", f"Không thể đổi tên danh mục '{old_name}'.")
+            return False
+    
+    def _handle_delete_category(self, category_name: str) -> bool:
+        """Xử lý xóa danh mục"""
+        from tkinter import messagebox as mb
+        confirm = mb.askyesno("Xác nhận", f"Bạn có chắc muốn xóa danh mục '{category_name}'?\nCác ghi chú trong danh mục này sẽ không bị xóa.")
+        if not confirm:
+            return False
+        
+        success = self.controller.delete_category(category_name)
+        if success:
+            messagebox.showinfo("Thành công", f"Đã xóa danh mục '{category_name}'")
+            
+            # Reload all notes from database
+            self.controller.repository.load_notes()
+            
+            # Refresh categories
+            categories = self.controller.get_categories()
+            self.view.update_categories(categories)
+            
+            # Switch to "Tất cả"
+            self._handle_filter_change(FilterType.ALL)
+            return True
+        else:
+            messagebox.showerror("Lỗi", f"Không thể xóa danh mục '{category_name}'.")
+            return False
     
     # ==================== Helper Methods ====================
     
